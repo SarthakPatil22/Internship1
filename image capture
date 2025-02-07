@@ -1,0 +1,47 @@
+
+!pip install diffusers transformers accelerate safetensors torch torchvision
+
+from IPython.display import display, Image as IPImage
+import os
+import torch
+from PIL import Image
+from diffusers import StableDiffusionInstructPix2PixPipeline
+
+
+image_path = "/content/drive/MyDrive/Project/Images/captured_image.jpg"
+
+if os.path.exists(image_path):
+    display(IPImage(image_path))
+    print(f" Image loaded from: {image_path}")
+else:
+    print(f" Error: Image not found at {image_path}. Please capture an image first.")
+    exit()
+
+
+access_token = ""
+
+model_id = "timbrooks/instruct-pix2pix"
+device = "cuda" if torch.cuda.is_available() else "cpu"
+torch_dtype = torch.float16 if device == "cuda" else torch.float32
+
+print(" Loading model, please wait...")
+pipe = StableDiffusionInstructPix2PixPipeline.from_pretrained(
+    model_id, torch_dtype=torch_dtype, use_auth_token=access_token
+).to(device)
+print(" Model loaded successfully!")
+
+prompt = input(" Enter your transformation prompt: ")
+
+image = Image.open(image_path).convert("RGB")
+
+num_steps = 15  # Reduce steps for speed
+image_guidance_scale = 1.0  # Lower scale for faster processing
+
+print(f" Transforming image with prompt: {prompt}")
+edited_image = pipe(prompt, image=image, num_inference_steps=num_steps, image_guidance_scale=image_guidance_scale).images[0]
+
+edited_image_path = "/content/drive/MyDrive/Project/Images/transformed_image.jpg"
+edited_image.save(edited_image_path)
+
+display(IPImage(edited_image_path))
+print(f" Transformed image saved at: {edited_image_path}")
