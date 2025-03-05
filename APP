@@ -1,0 +1,75 @@
+import io
+from flask import Flask, request, send_file, jsonify
+import torch
+from PIL import Image
+from diffusers import StableDiffusionInstructPix2PixPipeline
+import pymongo
+import gridfs
+
+app = Flask(__name__)
+
+# Connect to MongoDB on port 27018
+mongo_client = pymongo.MongoClient("mongodb://localhost:27018")
+db = mongo_client["imageTransformation"]
+fs = gridfs.GridFS(db)
+
+# Load the diffusers model (runs once on startup)
+access_token = "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"  # Update with your token if needed
+model_id = "timbrooks/instruct-pix2pix"
+device = "cuda" if torch.cuda.is_available() else "cpu"
+torch_dtype = torch.float16 if device == "cuda" else torch.float32
+
+print("Loading model, please wait...")
+pipe = StableDiffusionInstructPix2PixPipeline.from_pretrained(
+    model_id,
+    torch_dtype=torch_dtype,
+    use_auth_token=access_token
+)
+pipe = pipe.to(device)
+print("Model loaded successfully!")
+
+@app.route("/upload-image", methods=["POST"])
+def upload_image():
+    if "image" not in request.files:
+        return jsonify({"error": "No image file provided"}), 400
+
+    image_file = request.files["image"]
+
+    try:
+        image_bytes = image_file.read()
+        original_image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+    except Exception as e:
+        return jsonify({"error": f"Error processing image: {str(e)}"}), 400
+
+    # Store the original image in MongoDB using GridFS
+    original_id = fs.put(image_bytes, filename="original.jpg")
+
+    # Use a fixed transformation prompt
+    prompt = "Turn the image into oil paint"
+
+    # Optimization settings
+    num_steps = 5  # Fewer steps for faster processing
+    image_guidance_scale = 1.0
+
+    print(f"Transforming image with prompt: {prompt}")
+    edited_image = pipe(
+        prompt,
+        image=original_image,
+        num_inference_steps=num_steps,
+        image_guidance_scale=image_guidance_scale
+    ).images[0]
+
+    # Save the transformed image to a bytes buffer in JPEG format
+    transformed_io = io.BytesIO()
+    edited_image.save(transformed_io, format="JPEG")
+    transformed_io.seek(0)
+    transformed_bytes = transformed_io.read()
+
+    # Store the transformed image in MongoDB using GridFS
+    transformed_id = fs.put(transformed_bytes, filename="transformed.jpg")
+
+    # Return the transformed image
+    return send_file(io.BytesIO(transformed_bytes), mimetype="image/jpeg")
+
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=3000)
